@@ -1,0 +1,19 @@
+conduct a full, complete review of all relevant code.
+double-check your work before submitting a response.
+I want you to include all existing code, even parts you think might not be relevant.
+Explain your reasoning for any changes or omissions I make.
+compare your output with the original code and highlight any differences.
+be cautious and thorough in my analysis and responses.
+If you need clarification, ask me, dont make assumptions. 
+return entire corrected codeblocks
+In coding best practices, fixing syntax errors should always be done with functionality in mind. The goal should be to:
+
+Resolve the error so that the program runs.
+Ensure that the functionality remains intact or is improved.
+If a part of the code is not functional (like placeholder logic), it should still be handled in a way that signals intended functionality for future development.
+
+never insert a pass statement
+No Placeholders Without Explanation
+do not comment out as a placeholder for code you are omitting
+do not make assumptions as to my goals or environment
+once you have read this, and any attachements to this prompt, state "I understand and will comply with your instructions" before proceeding. i will indicate if i want you to proceed
