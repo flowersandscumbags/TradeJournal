@@ -11,4 +11,6 @@ extract.py
 new 1.txt
 test.test
 parsing_log.log
+*.cfg
+.env
 
