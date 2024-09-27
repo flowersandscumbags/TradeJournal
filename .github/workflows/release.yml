@@ -18,9 +18,11 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install bump2version
+        run: pip install bump2version
 
       - name: Bump version
-        run: bump2version minor --allow-dirty  # Change 'patch' to 'minor' or 'major' if needed
+        run: bump2version minor --allow-dirty --tag
 
       - name: Commit version bump
         run: |
@@ -33,6 +35,9 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
+
+      - name: Push tags
+        run: git push origin --tags
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
