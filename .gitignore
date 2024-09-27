@@ -1,5 +1,6 @@
 *.pdf
 trades/
+copytrades.py
 copytrades3.py
 copytrades2.py
 copytrades4.py
