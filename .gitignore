@@ -1,10 +1,5 @@
 *.pdf
 trades/
-copytrades.py
-copytrades3.py
-copytrades2.py
-copytrades4.py
-copytrades5.py
 j.xlsx
 error.txt
 extract.py
@@ -13,4 +8,7 @@ test.test
 parsing_log.log
 *.cfg
 .env
+*.log
+charts/
+misc/
 
