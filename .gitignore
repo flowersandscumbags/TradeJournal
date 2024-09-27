@@ -1,6 +1,6 @@
 *.pdf
 trades/
-copytrades.py
+copytrades3.py
 copytrades2.py
 copytrades4.py
 copytrades5.py
@@ -9,4 +9,5 @@ error.txt
 extract.py
 new 1.txt
 test.test
+parsing_log.log
 
