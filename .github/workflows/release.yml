@@ -22,13 +22,15 @@ jobs:
         run: pip install bump2version
 
       - name: Bump version
-        run: bump2version minor --allow-dirty --tag
+        run: bump2version minor --new-version <NEW_VERSION> --allow-dirty --tag
+        env:
+          NEW_VERSION: 1.0.6  # Replace this with the appropriate version
 
       - name: Commit version bump
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "Bump version"
+          git commit -am "Bump version to $NEW_VERSION"
 
       - name: Push changes
         uses: ad-m/github-push-action@v0.6.0
