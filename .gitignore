@@ -1,4 +1,12 @@
 *.pdf
 trades/
-copytrades*
+copytrades.py
+copytrades2.py
+copytrades4.py
+copytrades5.py
+j.xlsx
+error.txt
+extract.py
+new 1.txt
+test.test
 
