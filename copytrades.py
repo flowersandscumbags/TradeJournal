@@ -1,10 +1,18 @@
 import os
 import pdfplumber
 import pandas as pd
+import subprocess
+import time
+import openpyxl
 from openpyxl import load_workbook
 import logging
 import tkinter as tk
 from tkinter import filedialog
+from openpyxl.styles import NamedStyle
+import zipfile
+
+def is_valid_zip(file_path):
+    return zipfile.is_zipfile(file_path)
 
 # Setup logging configuration
 logging.basicConfig(
@@ -46,7 +54,6 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
     return trades
 
 def find_last_row(worksheet):
-
     last_row = worksheet.max_row
     while last_row > 0:
         if worksheet.cell(row=last_row, column=1).value is not None:  # Assuming data is in column 1
@@ -56,16 +63,27 @@ def find_last_row(worksheet):
 
 def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
     logging.info(f"Appending {len(trades)} trades to Excel sheets")
-    
+
     existing_trades = set()
     last_row_trade_details = find_last_row(ws_trade_details)
     last_row_trade_outcome = find_last_row(ws_trade_outcome)
+    
+    # Create named styles for formatting
+    currency_style = NamedStyle(name="currency_style", number_format='$#,##0.00')
+    number_style_plus = NamedStyle(name="number_style_plus", number_format='0.00000000')
+    currency_style_red_black = NamedStyle(name="currency_style_red_black", number_format='"$"#,##0.00_);[Red]"$"#,##0.00')
 
+    new_trades_count = 0
+
+    # Iterate over existing trade details to track already logged trades
     for row in ws_trade_details.iter_rows(min_row=2, max_row=last_row_trade_details, values_only=True):
         if row[0]:  # Check if the row is not empty
             existing_trades.add((row[0], row[2], row[3], row[7]))  # Date, Symbol, Shares, Order Type
 
-    new_trades_count = 0
+    # Start appending new trades from the next available row
+    next_row_trade_details = last_row_trade_details + 1 if last_row_trade_details > 1 else 2
+    next_row_trade_outcome = last_row_trade_outcome + 1 if last_row_trade_outcome > 1 else 2
+
     for trade in trades:
         trade_key = (
             trade['Trade Date'],
@@ -73,9 +91,9 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
             abs(float(trade['Quantity'].replace(',', ''))),
             'Buy' if trade['Buy/Sell'] == 'B' else 'Sell'
         )
-        
-        if trade_key not in existing_trades:
-            # Mapping for Trade Entry Details
+
+        if trade_key not in existing_trades:  # Check if the trade already exists
+            # Construct and append the new trade details
             trade_details_row = [
                 trade['Trade Date'],
                 '',  # Time (not available in your data)
@@ -89,6 +107,14 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
             ]
             ws_trade_details.append(trade_details_row)
             logging.info(f"Appended new trade details: {trade_details_row}")
+            
+            # Apply number style to the relevant cells
+            for col in [4]:  
+                ws_trade_details.cell(row=next_row_trade_details + new_trades_count, column=col).style = number_style_plus
+            
+            # Apply currency style to the relevant cells
+            for col in [5, 6, 7]:  # Assuming these columns need currency formatting
+                ws_trade_details.cell(row=next_row_trade_details + new_trades_count, column=col).style = currency_style_red_black
 
             # Mapping for Trade Outcome
             outcome_row = [
@@ -99,6 +125,10 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
             ]
             ws_trade_outcome.append(outcome_row)
             logging.info(f"Appended new trade outcome: {outcome_row}")
+            
+            # Apply currency style to the Trade Outcome cells
+            for col in [2, 3, 4]:  # Columns B, C, D in Trade Outcome sheet
+                ws_trade_outcome.cell(row=next_row_trade_outcome + new_trades_count, column=col).style = currency_style_red_black
             
             new_trades_count += 1
             existing_trades.add(trade_key)  # Add the new trade to existing trades
@@ -127,7 +157,7 @@ def select_folder_or_file(prompt):
 def main():
     print("Please select the folder containing the PDFs.")
     pdf_folder = select_folder_or_file("Select the folder containing the PDFs")
-    
+
     print("Please select the Excel file.")
     excel_path = select_folder_or_file("Select the Excel file")
 
@@ -140,35 +170,40 @@ def main():
         logging.error(f"The file {excel_path} does not exist.")
         return
 
+    if not is_valid_zip(excel_path):
+        logging.error(f"The file {excel_path} is not a valid Excel file.")
+        return
+
     try:
         wb = load_workbook(excel_path)
         logging.info(f"Successfully loaded Excel file: {excel_path}")
-    except Exception as e:
-        logging.error(f"Error opening Excel file {excel_path}: {str(e)}")
-        return
 
-    ws_trade_details = get_or_create_sheet(wb, 'Trade Entry Details')
-    ws_trade_outcome = get_or_create_sheet(wb, 'Trade Outcome')
+        ws_trade_details = get_or_create_sheet(wb, 'Trade Entry Details')
+        ws_trade_outcome = get_or_create_sheet(wb, 'Trade Outcome')
 
-    pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf')]
+        pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf')]
 
-    if not pdf_files:
-        logging.warning(f"No PDF files found in the folder {pdf_folder}.")
-    else:
-        all_trades = []
-        for pdf_file in pdf_files:
-            pdf_path = os.path.join(pdf_folder, pdf_file)
-            logging.info(f"Processing {pdf_file}...")
-            trades = extract_pdf_data_with_pdfplumber(pdf_path)
-            all_trades.extend(trades)
-
-        if all_trades:
-            append_trades_to_excel(all_trades, ws_trade_details, ws_trade_outcome)
+        if not pdf_files:
+            logging.warning(f"No PDF files found in the folder {pdf_folder}.")
         else:
-            logging.warning("No trades found in any PDF.")
+            all_trades = []
+            for pdf_file in pdf_files:
+                pdf_path = os.path.join(pdf_folder, pdf_file)
+                logging.info(f"Processing {pdf_file}...")
+                trades = extract_pdf_data_with_pdfplumber(pdf_path)
+                all_trades.extend(trades)
 
-    wb.save(excel_path)
-    logging.info(f"Workbook saved to {excel_path}")
+            if all_trades:
+                append_trades_to_excel(all_trades, ws_trade_details, ws_trade_outcome)
+            else:
+                logging.warning("No trades found in any PDF.")
+
+        wb.save(excel_path)
+        logging.info(f"Workbook saved to {excel_path}")
+
+    except Exception as e:
+        logging.error(f"Error processing Excel file {excel_path}: {str(e)}")
+        return
 
     logging.info("Script execution completed.")
 

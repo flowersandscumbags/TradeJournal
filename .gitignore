@@ -11,4 +11,8 @@ parsing_log.log
 *.log
 charts/
 misc/
+.bumpversion.cfg
+mapping.txt
+new 2.txt
+
 
