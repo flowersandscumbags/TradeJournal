@@ -5,6 +5,9 @@ on:
     branches:
       - main  # This means the action runs on every push to the 'main' branch
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
