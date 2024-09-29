@@ -45,33 +45,67 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
     logging.info(f"Extracted {len(trades)} trades from {pdf_path}")
     return trades
 
+def find_last_row(worksheet):
+
+    last_row = worksheet.max_row
+    while last_row > 0:
+        if worksheet.cell(row=last_row, column=1).value is not None:  # Assuming data is in column 1
+            break
+        last_row -= 1
+    return last_row
+
 def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
     logging.info(f"Appending {len(trades)} trades to Excel sheets")
     
-    for trade in trades:
-        # Mapping for Trade Entry Details
-        trade_details_row = [
-            trade['Trade Date'],
-            '',  # Time (not available in your data)
-            trade['Symbol & Name'].split()[0],  # Ticker Symbol
-            abs(float(trade['Quantity'].replace(',', ''))),  # Shares (absolute value)
-            abs(float(trade['Gross Amount'].replace(',', ''))),  # Position Size (absolute value)
-            float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'B' else '',  # Entry Price
-            float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'S' else '',  # Exit Price
-            'Buy' if trade['Buy/Sell'] == 'B' else 'Sell',  # Order Type
-            'Long'  # Assuming all trades are Long
-        ]
-        ws_trade_details.append(trade_details_row)
-        logging.info(f"Appended trade details: {trade_details_row}")
+    existing_trades = set()
+    last_row_trade_details = find_last_row(ws_trade_details)
+    last_row_trade_outcome = find_last_row(ws_trade_outcome)
 
-        # Mapping for Trade Outcome
-        outcome_row = [
-            float(trade['Commission'].replace(',', '')),  # Commissions and Fees
-            float(trade['Fee/Tax'].replace(',', '')),  # Tax
-            float(trade['Net Amount'].replace(',', ''))  # Net
-        ]
-        ws_trade_outcome.append(outcome_row)
-        logging.info(f"Appended trade outcome: {outcome_row}")
+    for row in ws_trade_details.iter_rows(min_row=2, max_row=last_row_trade_details, values_only=True):
+        if row[0]:  # Check if the row is not empty
+            existing_trades.add((row[0], row[2], row[3], row[7]))  # Date, Symbol, Shares, Order Type
+
+    new_trades_count = 0
+    for trade in trades:
+        trade_key = (
+            trade['Trade Date'],
+            trade['Symbol & Name'].split()[0],
+            abs(float(trade['Quantity'].replace(',', ''))),
+            'Buy' if trade['Buy/Sell'] == 'B' else 'Sell'
+        )
+        
+        if trade_key not in existing_trades:
+            # Mapping for Trade Entry Details
+            trade_details_row = [
+                trade['Trade Date'],
+                '',  # Time (not available in your data)
+                trade['Symbol & Name'].split()[0],  # Ticker Symbol
+                abs(float(trade['Quantity'].replace(',', ''))),  # Shares (absolute value)
+                abs(float(trade['Gross Amount'].replace(',', ''))),  # Position Size (absolute value)
+                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'B' else '',  # Entry Price
+                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'S' else '',  # Exit Price
+                'Buy' if trade['Buy/Sell'] == 'B' else 'Sell',  # Order Type
+                'Long'  # Assuming all trades are Long
+            ]
+            ws_trade_details.append(trade_details_row)
+            logging.info(f"Appended new trade details: {trade_details_row}")
+
+            # Mapping for Trade Outcome
+            outcome_row = [
+                '',  # Empty cell for column A
+                float(trade['Commission'].replace(',', '')),  # Commissions and Fees
+                float(trade['Fee/Tax'].replace(',', '')),  # Tax
+                float(trade['Net Amount'].replace(',', ''))  # Net
+            ]
+            ws_trade_outcome.append(outcome_row)
+            logging.info(f"Appended new trade outcome: {outcome_row}")
+            
+            new_trades_count += 1
+            existing_trades.add(trade_key)  # Add the new trade to existing trades
+        else:
+            logging.info(f"Skipped duplicate trade: {trade_key}")
+
+    logging.info(f"Appended {new_trades_count} new trades to Excel sheets")
 
 def get_or_create_sheet(wb, sheet_name):
     if sheet_name not in wb.sheetnames:
