@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - '*'  # This means the action runs on every push to a tag starting with 'v'
+      - '*'  # This means the action runs on every push to a tag
 
 permissions:
   contents: write
@@ -29,29 +29,16 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
-        run: bump2version minor --allow-dirty --tag
-
-      - name: Commit version bump
-        run: git commit -am "Bump version to $(cat version.txt)"
-
-      - name: Force push changes
-        uses: ad-m/github-push-action@v0.6.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-          force: true
-
-      - name: Push tags
-        run: git push origin --tags --force
-
-      - name: Wait for tag to be available
-        run: sleep 10
+      - name: Verify tag
+        run: |
+          echo "Tag: $GITHUB_REF"
+          if [ -z "$GITHUB_REF" ]; then
+            echo "No tag found."
+            exit 1
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/*  # Path to any files you want to attach to the release (optional)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        env:GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
