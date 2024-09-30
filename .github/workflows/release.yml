@@ -53,6 +53,9 @@ jobs:
       - name: Push tags
         run: git push origin --tags --force
 
+      - name: Wait for tag to be available
+        run: sleep 10
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
