@@ -43,14 +43,15 @@ jobs:
       - name: Commit version bump
         run: git commit -am "Bump version to $(cat version.txt)"
 
-      - name: Push changes
+      - name: Force push changes
         uses: ad-m/github-push-action@v0.6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
+          force: true
 
       - name: Push tags
-        run: git push origin --tags
+        run: git push origin --tags --force
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
