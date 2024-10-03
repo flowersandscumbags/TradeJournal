@@ -1,37 +1,95 @@
 import os
 import pdfplumber
-import pandas as pd
-from openpyxl import load_workbook, Workbook
 import logging
 import tkinter as tk
 from tkinter import filedialog
+from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import numbers
+import threading
+import time
+import csv
+import sys
+import shutil
+from tkinter import ttk
+import winsound
+from tkinter import messagebox
 
-# Setup logging configuration
-logging.basicConfig(
-    filename='parsing_log.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Determine if the app is running as a PyInstaller bundle
+if getattr(sys, 'frozen', False):
+    # If running as a PyInstaller bundle
+    base_path = sys._MEIPASS
+else:
+    # If running in a normal Python environment
+    base_path = os.path.dirname(__file__)
 
-# Log to console as well
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-console.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logging.getLogger().addHandler(console)
+# Construct the full path to the bundled file
+lic_path = os.path.join(base_path, 'lic')
+readme_path = os.path.join(base_path, 'README.md')
 
-def get_or_create_style(workbook, style_name, number_format):
-    if style_name in workbook.named_styles:
-        return workbook.named_styles[style_name]
+def setup_logging():
+    log_file = 'parsing_log.log'
+    
+    # Remove the old log file if it exists
+    if os.path.exists(log_file):
+        os.remove(log_file)
+    
+    logging.basicConfig(
+        filename=log_file,
+        filemode='w',  # 'w' mode overwrites the file
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+    # Log to console as well
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logging.getLogger('').addHandler(console)
+
+# Call this function at the start of your script
+setup_logging()
+
+def close_splash_screen(splash, root):
+    splash.destroy()
+    root.deiconify()
+
+def show_splash_screen(root):
+    splash = tk.Toplevel()
+    splash.geometry("300x150")
+    splash.title("Loading...")
+    label = tk.Label(splash, text="App is loading...", font=("Helvetica", 16))
+    label.pack(expand=True)
+    root.withdraw()
+    root.after(3000, close_splash_screen, splash, root)
+
+def get_last_row(ws):
+    max_row = 0
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is not None:
+                max_row = max(max_row, cell.row)
+    return max_row
+
+def select_folder_or_file(prompt, select_file=False):
+    root = tk.Tk()
+    root.withdraw()
+
+    if select_file:
+        path = filedialog.askopenfilename(title=prompt, filetypes=[("Excel files", "*.xlsx")])
     else:
-        new_style = NamedStyle(name=style_name, number_format=number_format)
-        workbook.add_named_style(new_style)
-        return new_style
+        path = filedialog.askdirectory(title=prompt)
+
+    return path
 
 def extract_pdf_data_with_pdfplumber(pdf_path):
     logging.info(f"Extracting data from {pdf_path} using pdfplumber")
     trades = []
-    columns = ["Symbol & Name", "Cusip", "Trade Date", "Settlement Date", "Account Type", "Buy/Sell", "Quantity", "Price", "Gross Amount", "Commission", "Fee/Tax", "Net Amount", "MKT", "Solicitation", "CAP"]
+    columns = [
+        "Symbol & Name", "Cusip", "Trade Date", "Settlement Date", "Account Type", "Buy/Sell",
+        "Quantity", "Price", "Gross Amount", "Commission", "Fee/Tax", "Net Amount", "MKT", "Solicitation", "CAP"
+    ]
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -40,7 +98,7 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
                 tables = page.extract_tables()
                 for table_num, table in enumerate(tables, start=1):
                     logging.info(f"Processing table {table_num} on page {page_num}")
-                    if len(table[0]) == len(columns):
+                    if len(table) > 0 and len(table[0]) == len(columns):
                         logging.info(f"Table {table_num} on page {page_num} matches expected column structure")
                         for row in table[1:]:
                             trade = {columns[i]: str(cell).strip() for i, cell in enumerate(row)}
@@ -55,158 +113,208 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
     logging.info(f"Extracted {len(trades)} trades from {pdf_path}")
     return trades
 
-def find_last_row(worksheet):
-    last_row = worksheet.max_row
-    while last_row > 0:
-        if worksheet.cell(row=last_row, column=1).value is not None:
-            break
-        last_row -= 1
-    return last_row
-
-def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
-    logging.info(f"Appending {len(trades)} trades to Excel sheets")
-    
-    existing_trades = set()
-    last_row_trade_details = find_last_row(ws_trade_details)
-    last_row_trade_outcome = find_last_row(ws_trade_outcome)
-
-    for row in ws_trade_details.iter_rows(min_row=2, max_row=last_row_trade_details, values_only=True):
-        if row[0]:
-            existing_trades.add((row[0], row[2], row[3], row[7]))
-
-    new_trades_count = 0
-    for trade in trades:
-        trade_key = (
-            trade['Trade Date'],
-            trade['Symbol & Name'].split()[0],
-            abs(float(trade['Quantity'].replace(',', ''))),
-            'Buy' if trade['Buy/Sell'] == 'B' else 'Sell'
-        )
+def write_trades_to_excel(trades, excel_path, root):
+    try:
+        logging.info(f"Writing {len(trades)} trades to Excel file: {excel_path}")
         
-        if trade_key not in existing_trades:
-            next_row_trade_details = find_last_row(ws_trade_details) + 1
-            next_row_trade_outcome = find_last_row(ws_trade_outcome) + 1
-
-            # Mapping for Trade Entry Details
-            trade_details_row = [
-                trade['Trade Date'],
-                '',  # Time (not available in your data)
-                trade['Symbol & Name'].split()[0],  # Ticker Symbol
-                abs(float(trade['Quantity'].replace(',', ''))),  # Shares (absolute value)
-                abs(float(trade['Gross Amount'].replace(',', ''))),  # Position Size (absolute value)
-                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'B' else '',  # Entry Price
-                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'S' else '',  # Exit Price
-                'Buy' if trade['Buy/Sell'] == 'B' else 'Sell',  # Order Type
-                'Long'  # Assuming all trades are Long
-            ]
-            ws_trade_details.append(trade_details_row)
-            logging.info(f"Appended new trade details: {trade_details_row}")
-
-            # Apply number style to the relevant cells
-            for col in [4]:  
-                ws_trade_details.cell(row=next_row_trade_details, column=col).style = styles['number_style_plus']
-            
-            # Apply currency style to the relevant cells
-            for col in [5, 6, 7]:
-                ws_trade_details.cell(row=next_row_trade_details, column=col).style = styles['currency_style_red_black']
-
-            # Mapping for Trade Outcome
-            outcome_row = [
-                '',  # Empty cell for column A
-                float(trade['Commission'].replace(',', '')),  # Commissions and Fees
-                float(trade['Fee/Tax'].replace(',', '')),  # Tax
-                float(trade['Net Amount'].replace(',', ''))  # Net
-            ]
-            ws_trade_outcome.append(outcome_row)
-            logging.info(f"Appended new trade outcome: {outcome_row}")
-            
-            # Apply currency style to the Trade Outcome cells
-            for col in [2, 3, 4]:  # Columns B, C, D in Trade Outcome sheet
-                ws_trade_outcome.cell(row=next_row_trade_outcome, column=col).style = styles['currency_style_red_black']
-
-            new_trades_count += 1
-            existing_trades.add(trade_key)
+        # Load existing workbook
+        workbook = load_workbook(excel_path)
+        
+        # Access or create 'Trade Entry Details' sheet
+        if 'Trade Entry Details' in workbook.sheetnames:
+            ws_trade_details = workbook['Trade Entry Details']
         else:
-            logging.info(f"Skipped duplicate trade: {trade_key}")
+            ws_trade_details = workbook.create_sheet('Trade Entry Details')
+            ws_trade_details.append([
+                'Date', 'Time', 'Ticker Symbol', 'Shares', 'Position Size', 'Entry Price',
+                'Exit Price', 'Order Type', 'Long/Short', 'Trade ID'
+            ])
 
-    logging.info(f"Appended {new_trades_count} new trades to Excel sheets")
+        # Access or create 'Trade Outcome' sheet
+        if 'Trade Outcome' in workbook.sheetnames:
+            ws_trade_outcome = workbook['Trade Outcome']
+        else:
+            ws_trade_outcome = workbook.create_sheet('Trade Outcome')
+            ws_trade_outcome.append([
+                'Profit/Loss', 'Commissions and Fees', 'Tax', 'Net', 'Trade ID'
+            ])
 
-def get_or_create_sheet(wb, sheet_name):
-    if sheet_name not in wb.sheetnames:
-        logging.info(f"Creating new sheet: {sheet_name}")
-        sheet = wb.create_sheet(sheet_name)
-        if sheet_name == 'Trade Entry Details':
-            headers = ['Date', 'Time', 'Ticker Symbol', 'Shares', 'Position Size', 'Entry Price', 'Exit Price', 'Order Type', 'Long/Short']
-        elif sheet_name == 'Trade Outcome':
-            headers = ['Profit/Loss', 'Commissions and Fees', 'Tax', 'Net']
-        sheet.append(headers)
-    return wb[sheet_name]
+        # Define the formats directly
+        number_format_8_dec = '0.00000000'
+        currency_format_red_black = '"$"#,##0.00_);[Red]"$"#,##0.00'
 
-def select_folder_or_file(prompt):
-    root = tk.Tk()
-    root.withdraw()
+        # Get existing trades
+        existing_trades = set()
+        for row in ws_trade_details.iter_rows(min_row=2, values_only=True):
+            if row[0] and row[2] and row[3] and row[9]:  # Date, Symbol, Shares, Trade ID
+                existing_trades.add((row[0], row[2], row[3], row[9]))
+
+        # Write trade details and outcomes, grouped by CUSIP (which is mapped to Trade ID)
+        new_trades_count = 0
+        for trade in trades:
+            trade_date = trade['Trade Date']
+            symbol = trade['Symbol & Name'].split()[0]
+            shares = float(trade['Quantity'].replace(',', ''))
+            cusip = trade['Cusip']
+
+            # Check if trade already exists
+            if (trade_date, symbol, shares, cusip) in existing_trades:
+                logging.info(f"Skipping existing trade: Date={trade_date}, Symbol={symbol}, Shares={shares}, CUSIP={cusip}")
+                continue
+
+            ws_trade_details.append([
+                trade_date,
+                '',  # Time (not available in your data)
+                symbol,
+                shares,
+                float(trade['Gross Amount'].replace(',', '')),
+                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'B' else '',
+                float(trade['Price'].replace(',', '')) if trade['Buy/Sell'] == 'S' else '',
+                'Buy' if trade['Buy/Sell'] == 'B' else 'Sell',
+                'Long',
+                cusip
+            ])
+            
+            # Apply number format to relevant columns in 'Trade Entry Details'
+            ws_trade_details.cell(row=ws_trade_details.max_row, column=4).number_format = number_format_8_dec
+            for col in [5, 6, 7]:
+                last_row_details = ws_trade_details.max_row
+                ws_trade_details.cell(row=last_row_details, column=col).number_format = currency_format_red_black
+
+            ws_trade_outcome.append([
+                '',  # Profit/Loss is not calculated here, can be calculated later if needed
+                float(trade['Commission'].replace(',', '')),
+                float(trade['Fee/Tax'].replace(',', '')),
+                float(trade['Net Amount'].replace(',', '')),
+                cusip
+            ])
+            
+            # Apply red/black currency format to columns in 'Trade Outcome'
+            for col in [2, 3, 4]:
+                last_row_outcome = ws_trade_outcome.max_row
+                ws_trade_outcome.cell(row=last_row_outcome, column=col).number_format = currency_format_red_black
+
+            # Add to existing trades set
+            existing_trades.add((trade_date, symbol, shares, cusip))
+
+        # Save workbook
+        workbook.save(excel_path)
+        logging.info(f"Excel file saved: {excel_path}")
+        logging.info(f"Added {new_trades_count} new trades")
+        root.event_generate('<<ProcessingComplete>>', when='tail')
     
-    if "folder" in prompt.lower():
-        path = filedialog.askdirectory(title=prompt)
+    except PermissionError as e:
+        logging.error(f"Permission error: {e}")
+        root.event_generate('<<PermissionError>>', when='tail')
+
+def process_files_and_update_progress(pdf_folder, excel_path, progress_bar, stop_event, root):
+    global all_trades
+    all_trades = []
+
+    pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf')]
+
+    total_files = len(pdf_files)
+    if total_files == 0:
+        logging.warning(f"No PDF files found in the folder {pdf_folder}.")
+        root.event_generate('<<ProcessingComplete>>', when='tail')
+        return
+
+    for i, pdf_file in enumerate(pdf_files, start=1):
+        if stop_event.is_set():
+            break
+
+        pdf_path = os.path.join(pdf_folder, pdf_file)
+        logging.info(f"Processing {pdf_file}...")
+        trades = extract_pdf_data_with_pdfplumber(pdf_path)
+        all_trades.extend(trades)
+
+        # Update the progress bar after processing each PDF
+        progress_percentage = (i / total_files) * 100
+        progress_bar['value'] = progress_percentage
+        root.update_idletasks()  # Force update of the progress bar
+
+    if all_trades and not stop_event.is_set():
+        write_trades_to_excel(all_trades, excel_path, root)
     else:
-        path = filedialog.askopenfilename(title=prompt, filetypes=[("Excel files", "*.xlsx")])
-    
-    return path
+        logging.warning("No trades found in any PDF or the process was stopped.")
+        root.event_generate('<<ProcessingComplete>>', when='tail')
+
+def start_processing_task(pdf_folder, excel_path, progress_bar, stop_event, root):
+    def run_task():
+        process_files_and_update_progress(pdf_folder, excel_path, progress_bar, stop_event, root)
+
+    # Run the task in a separate thread to avoid blocking the main thread (UI)
+    task_thread = threading.Thread(target=run_task)
+    task_thread.start()
+
+def complete_processing(root):
+    try:
+        winsound.PlaySound('C:\\Windows\\Media\\chimes.wav', winsound.SND_FILENAME)
+    except RuntimeError as e:
+        print(f"Error playing sound: {e}")
+    finally:
+        root.event_generate('<<ProcessingComplete>>', when='tail')
+
+def main_app(pdf_folder, excel_path):
+    root = tk.Tk()
+    root.title("Processing Trades")
+    root.attributes('-topmost', True)  # This makes the window always on top
+    root.after(100, lambda: root.attributes('-topmost', False))
+
+    # Create a progress bar
+    progress_bar = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
+    progress_bar.pack(pady=40)
+
+    # Stop event to interrupt the task if needed
+    stop_event = threading.Event()
+
+    def on_processing_complete(event):
+        progress_bar.stop()
+        progress_bar.pack_forget()
+        root.quit()
+
+    def on_permission_error(event):
+        progress_bar.stop()
+        progress_bar.pack_forget()
+        messagebox.showerror("Permission Denied", "Please close the spreadsheet and try again.")
+        root.quit()
+
+    root.bind('<<ProcessingComplete>>', on_processing_complete)
+    root.bind('<<PermissionError>>', on_permission_error)
+
+    # Start processing task after the window is fully initialized and shown
+    root.after(100, lambda: start_processing_task(pdf_folder, excel_path, progress_bar, stop_event, root))
+
+    # Start the Tkinter event loop (this ensures the window is displayed)
+    root.mainloop()
+
+    # After mainloop exits, destroy the window
+    root.destroy()
+
+    logging.info("Processing completed.")
 
 def main():
+    global all_trades  # Declaring it as a global variable
+    all_trades = []  # Initialize an empty list to store all trades
+    
     print("Please select the folder containing the PDFs.")
     pdf_folder = select_folder_or_file("Select the folder containing the PDFs")
-    
-    print("Please select the Excel file.")
-    excel_path = select_folder_or_file("Select the Excel file")
+
+    print("Please select the existing Excel file to update.")
+    excel_path = select_folder_or_file("Select the existing Excel file to update", select_file=True)
+
+    if not excel_path:
+        logging.error("No Excel file selected. Exiting.")
+        return
 
     logging.info(f"Starting to process PDF files in folder: {pdf_folder}")
 
     if not os.path.exists(pdf_folder):
         logging.error(f"The folder {pdf_folder} does not exist.")
         return
-    if not os.path.exists(excel_path):
-        logging.error(f"The file {excel_path} does not exist.")
-        return
 
-    try:
-        wb = load_workbook(excel_path)
-        logging.info(f"Successfully loaded Excel file: {excel_path}")
-    except FileNotFoundError:
-        wb = Workbook()
-        logging.info(f"Created new workbook: {excel_path}")
-
-    # Create or get existing styles
-    styles = {
-        'currency_style': get_or_create_style(wb, "currency_style", '$#,##0.00'),
-        'number_style_plus': get_or_create_style(wb, "number_style_plus", '0.00000000'),
-        'currency_style_red_black': get_or_create_style(wb, "currency_style_red_black", '"$"#,##0.00_);[Red]"$"#,##0.00')
-    }
-
-    ws_trade_details = get_or_create_sheet(wb, 'Trade Entry Details')
-    ws_trade_outcome = get_or_create_sheet(wb, 'Trade Outcome')
-
-    pdf_files = [f for f in os.listdir(pdf_folder) if f.endswith('.pdf')]
-
-    if not pdf_files:
-        logging.warning(f"No PDF files found in the folder {pdf_folder}.")
-    else:
-        all_trades = []
-        for pdf_file in pdf_files:
-            pdf_path = os.path.join(pdf_folder, pdf_file)
-            logging.info(f"Processing {pdf_file}...")
-            trades = extract_pdf_data_with_pdfplumber(pdf_path)
-            all_trades.extend(trades)
-
-        if all_trades:
-            append_trades_to_excel(all_trades, ws_trade_details, ws_trade_outcome, styles)
-        else:
-            logging.warning("No trades found in any PDF.")
-
-    wb.save(excel_path)
-    logging.info(f"Workbook saved to {excel_path}")
-
-    logging.info("Script execution completed.")
+    # Launch the Tkinter app with progress bar
+    main_app(pdf_folder, excel_path)
 
 if __name__ == "__main__":
     main()
