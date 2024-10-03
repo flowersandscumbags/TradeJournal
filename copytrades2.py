@@ -1,32 +1,48 @@
 import os
 import pdfplumber
 import pandas as pd
-from openpyxl import load_workbook, Workbook
+from openpyxl import load_workbook
 import logging
 import tkinter as tk
 from tkinter import filedialog
+from openpyxl import Workbook
 from openpyxl.styles import NamedStyle
+
+wb = Workbook()
+currency_style = NamedStyle(name="currency_style")
 
 # Setup logging configuration
 logging.basicConfig(
-    filename='parsing_log.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    filename='parsing_log.log',  # Log to file
+    level=logging.DEBUG,  # Log level
+    format='%(asctime)s - %(levelname)s - %(message)s'  # Log format
 )
 
 # Log to console as well
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-console.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+console = logging.StreamHandler()  # Create a console handler
+console.setLevel(logging.INFO)  # Set logging level for console
+console.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))  # Optional: set format for console logs
+
+# Add the console handler to the root logger
 logging.getLogger().addHandler(console)
 
-def get_or_create_style(workbook, style_name, number_format):
-    if style_name in workbook.named_styles:
-        return workbook.named_styles[style_name]
-    else:
-        new_style = NamedStyle(name=style_name, number_format=number_format)
-        workbook.add_named_style(new_style)
-        return new_style
+# Initialize the workbook
+wb = Workbook()
+
+# Check if the style already exists in the workbook before adding
+if "number_style_plus" not in wb.named_styles:
+    number_style_p = NamedStyle(name="number_style_p", number_format='0.00000000')
+    wb.add_named_style(number_style_p)
+
+if "currency_style_red_black" not in wb.named_styles:
+    currency_style_red_black = NamedStyle(name="currency_style_red_black", number_format='"$"#,##0.00_);[Red]"$"#,##0.00')
+    wb.add_named_style(currency_style_red_black)
+
+# Create named styles for formatting
+currency_style = NamedStyle(name="currency_style", number_format='$#,##0.00')
+number_style_p = NamedStyle(name="number_style_p", number_format='0.00000000')
+currency_style_red_black = NamedStyle(name="currency_style_red_black", number_format='"$"#,##0.00_);[Red]"$"#,##0.00')
+
 
 def extract_pdf_data_with_pdfplumber(pdf_path):
     logging.info(f"Extracting data from {pdf_path} using pdfplumber")
@@ -35,14 +51,14 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages[2:], start=3):
+            for page_num, page in enumerate(pdf.pages[2:], start=3):  # Start from the third page
                 logging.info(f"Processing page {page_num}")
                 tables = page.extract_tables()
                 for table_num, table in enumerate(tables, start=1):
                     logging.info(f"Processing table {table_num} on page {page_num}")
                     if len(table[0]) == len(columns):
                         logging.info(f"Table {table_num} on page {page_num} matches expected column structure")
-                        for row in table[1:]:
+                        for row in table[1:]:  # Skip the header row
                             trade = {columns[i]: str(cell).strip() for i, cell in enumerate(row)}
                             trades.append(trade)
                             logging.info(f"Captured trade data: {trade}")
@@ -56,14 +72,15 @@ def extract_pdf_data_with_pdfplumber(pdf_path):
     return trades
 
 def find_last_row(worksheet):
+
     last_row = worksheet.max_row
     while last_row > 0:
-        if worksheet.cell(row=last_row, column=1).value is not None:
+        if worksheet.cell(row=last_row, column=1).value is not None:  # Assuming data is in column 1
             break
         last_row -= 1
     return last_row
 
-def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
+def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome):
     logging.info(f"Appending {len(trades)} trades to Excel sheets")
     
     existing_trades = set()
@@ -71,8 +88,8 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
     last_row_trade_outcome = find_last_row(ws_trade_outcome)
 
     for row in ws_trade_details.iter_rows(min_row=2, max_row=last_row_trade_details, values_only=True):
-        if row[0]:
-            existing_trades.add((row[0], row[2], row[3], row[7]))
+        if row[0]:  # Check if the row is not empty
+            existing_trades.add((row[0], row[2], row[3], row[7]))  # Date, Symbol, Shares, Order Type
 
     new_trades_count = 0
     for trade in trades:
@@ -84,9 +101,6 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
         )
         
         if trade_key not in existing_trades:
-            next_row_trade_details = find_last_row(ws_trade_details) + 1
-            next_row_trade_outcome = find_last_row(ws_trade_outcome) + 1
-
             # Mapping for Trade Entry Details
             trade_details_row = [
                 trade['Trade Date'],
@@ -101,14 +115,22 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
             ]
             ws_trade_details.append(trade_details_row)
             logging.info(f"Appended new trade details: {trade_details_row}")
+            
+            next_row_trade_details = ws_trade_details.max_row + 1         
 
-            # Apply number style to the relevant cells
+
+                     # Apply number style to the relevant cells
             for col in [4]:  
-                ws_trade_details.cell(row=next_row_trade_details, column=col).style = styles['number_style_plus']
+                ws_trade_details.cell(row=next_row_trade_details + new_trades_count, column=col).style = number_style_p
+
             
             # Apply currency style to the relevant cells
-            for col in [5, 6, 7]:
-                ws_trade_details.cell(row=next_row_trade_details, column=col).style = styles['currency_style_red_black']
+            for col in [5, 6, 7]:  # Assuming these columns need currency formatting
+                ws_trade_details.cell(row=next_row_trade_details + new_trades_count, column=col).style = currency_style_red_black
+                
+                            # Apply currency style to the Trade Outcome cells
+            for col in [2, 3, 4]:  # Columns B, C, D in Trade Outcome sheet
+                ws_trade_outcome.cell(row=next_row_trade_outcome + new_trades_count, column=col).style = currency_style_red_black
 
             # Mapping for Trade Outcome
             outcome_row = [
@@ -120,12 +142,8 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
             ws_trade_outcome.append(outcome_row)
             logging.info(f"Appended new trade outcome: {outcome_row}")
             
-            # Apply currency style to the Trade Outcome cells
-            for col in [2, 3, 4]:  # Columns B, C, D in Trade Outcome sheet
-                ws_trade_outcome.cell(row=next_row_trade_outcome, column=col).style = styles['currency_style_red_black']
-
             new_trades_count += 1
-            existing_trades.add(trade_key)
+            existing_trades.add(trade_key)  # Add the new trade to existing trades
         else:
             logging.info(f"Skipped duplicate trade: {trade_key}")
 
@@ -134,12 +152,7 @@ def append_trades_to_excel(trades, ws_trade_details, ws_trade_outcome, styles):
 def get_or_create_sheet(wb, sheet_name):
     if sheet_name not in wb.sheetnames:
         logging.info(f"Creating new sheet: {sheet_name}")
-        sheet = wb.create_sheet(sheet_name)
-        if sheet_name == 'Trade Entry Details':
-            headers = ['Date', 'Time', 'Ticker Symbol', 'Shares', 'Position Size', 'Entry Price', 'Exit Price', 'Order Type', 'Long/Short']
-        elif sheet_name == 'Trade Outcome':
-            headers = ['Profit/Loss', 'Commissions and Fees', 'Tax', 'Net']
-        sheet.append(headers)
+        return wb.create_sheet(sheet_name)
     return wb[sheet_name]
 
 def select_folder_or_file(prompt):
@@ -172,16 +185,9 @@ def main():
     try:
         wb = load_workbook(excel_path)
         logging.info(f"Successfully loaded Excel file: {excel_path}")
-    except FileNotFoundError:
-        wb = Workbook()
-        logging.info(f"Created new workbook: {excel_path}")
-
-    # Create or get existing styles
-    styles = {
-        'currency_style': get_or_create_style(wb, "currency_style", '$#,##0.00'),
-        'number_style_plus': get_or_create_style(wb, "number_style_plus", '0.00000000'),
-        'currency_style_red_black': get_or_create_style(wb, "currency_style_red_black", '"$"#,##0.00_);[Red]"$"#,##0.00')
-    }
+    except Exception as e:
+        logging.error(f"Error opening Excel file {excel_path}: {str(e)}")
+        return
 
     ws_trade_details = get_or_create_sheet(wb, 'Trade Entry Details')
     ws_trade_outcome = get_or_create_sheet(wb, 'Trade Outcome')
@@ -199,7 +205,7 @@ def main():
             all_trades.extend(trades)
 
         if all_trades:
-            append_trades_to_excel(all_trades, ws_trade_details, ws_trade_outcome, styles)
+            append_trades_to_excel(all_trades, ws_trade_details, ws_trade_outcome)
         else:
             logging.warning("No trades found in any PDF.")
 

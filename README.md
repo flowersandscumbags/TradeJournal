@@ -25,6 +25,6 @@ This project automates the process of extracting trade data from PDFs and adding
    git clone https://github.com/your-username/TradeJournal.git
    cd TradeJournal
    pip install -r requirements.txt
-   copy.py
+   copytrades.py
 
    
